@@ -1,0 +1,113 @@
+---
+title: "Amazon Review Metadata Analysis"
+author: "Zoe Aiello"
+date: "3/7/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(car)
+```
+
+```{r}
+final_table <- read.csv("~/Downloads/final-table.csv")
+edited_table <- read.csv("~/Downloads/edited_dataset.csv")
+```
+
+### Question 1 ####
+```{r}
+# get columns of interest in the two dataframes
+final_q2_table <- select(final_table, asin, overall, verified)
+q_2_table <- select(edited_table, asin, list_life, review_count, six_mo, 
+                       sec_six)
+```
+
+```{r}
+# Find how many true reviews each product listing has
+ver_table <- final_q2_table %>% group_by(asin) %>% summarise(sum(verified == 'true'))
+
+# Get columns of interest from q_2_table
+review_table <- select(q_2_table, asin, review_count, six_mo)
+
+# renaming the column
+ver_table$verif <- ver_table$`sum(verified == "true")`
+
+# join the two tables by asin
+joint_table <- merge(ver_table, review_table, by = 'asin')
+
+```
+
+```{r}
+# proportion of verified reviews
+joint_table$verprop <- joint_table$verif/joint_table$review_count
+joint_table <- subset(joint_table, verprop <= 1)
+
+# rate of review accumulation per month over the first 6 months
+joint_table$sixprop <- joint_table$six_mo/6
+```
+
+```{r}
+# plot reviews per month (for first 6 months) against proportion of verified reviews
+qplot(verprop, sixprop, data = joint_table, xlab = 'proportion of verified reviews', 
+      ylab = 'Reviews per Month Over First Six Months of Listing')
+```
+Since we're suspicious of these reviews, lets compare the rate of accumulation for the points which have high rates of accumulation and a low proportion of verified reviews with the contrary:
+
+#### Question 2 ####
+
+```{r}
+
+# subset the suspicious and trustworthy data based on the plot
+sus_table <- joint_table[(joint_table$sixprop > 30) & (joint_table$verprop < 0.25), ]
+trust_table <- joint_table[(joint_table$sixprop < 30) & (joint_table$verprop > 0.75), ]
+
+# Join the datasets so that we have Review times for the sus and trust data
+q1_table <- select(edited_table, unixReviewTime, asin)
+trust_join <- trust_table %>% left_join(q1_table)
+sus_join <- sus_table %>% left_join(q1_table)
+```
+
+
+```{r}
+# see how big the datasets are
+# nrow(sus_join)
+# nrow(trust_join)
+
+# randomly sample from trust_join so that they're the same size
+trust_join <- trust_join[sample(nrow(trust_join), 760793), ]
+
+# Create review frequency plots for the trusted and suspicious data
+qplot(unixReviewTime, data = trust_join, ylab = 'frequency of trust reviews')
+qplot(unixReviewTime, data = sus_join, ylab = 'frequency of sus reviews')
+```
+
+#### Question 3 ####
+
+```{r}
+# convert verified to a 2-level factor
+final_table$verified <- factor(final_table$verified)
+
+# Find the mean of the overall score for verified reviews and for unverified reviews
+#aggregate(final_table$overall, list(final_table$verified), FUN=mean)
+
+# Levene test to check for equal variances:
+# H0: sigma1 = sigma2
+# H1: sigma1 =/= sigma2
+# where sigma1 is the variance of verified and sigma2 is the variance of overall
+#leveneTest(overall ~ verified, final_table)
+
+# p-value < 2.2e-16, reject H0, variances are unequal, use welch sattherwiate approximation
+
+
+# paired t-test
+# H0: u1 = u2
+# H1: u1 =/= u2
+t.test(final_table$overall, as.numeric(final_table$verified), paired = TRUE, alternative = 'greater', var.equal = FALSE)
+
+# P-value < 2.2e-16, 
+# With 95% confidence, the mean overall rating for verified reviews is, on average, between 2.469 and infinite units higher than the mean overall rating for unverified reviews. 
+```
+
